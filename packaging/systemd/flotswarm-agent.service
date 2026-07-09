@@ -1,0 +1,19 @@
+[Unit]
+Description=flotswarm agent — pull dispatched actions from SQS and run allowlisted commands
+Documentation=https://github.com/theatrus/flotswarm
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=flotswarm
+EnvironmentFile=/etc/flotswarm/agent.conf
+ExecStart=/usr/sbin/flotswarm-agent
+Restart=on-failure
+RestartSec=5
+# The agent execs allowlisted deploy scripts via `sudo -u <run_as>`, so
+# NoNewPrivileges must stay off. Privilege is bounded by /etc/sudoers.d/flotswarm,
+# not by the service sandbox.
+
+[Install]
+WantedBy=multi-user.target

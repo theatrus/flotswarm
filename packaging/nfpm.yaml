@@ -1,0 +1,40 @@
+# nfpm config — builds both .deb and .rpm for flotswarm-agent from one source.
+# Invoked from the repo Makefile (`make deb` / `make rpm`), which exports
+# VERSION and ARCH and builds ../target/release/flotswarm-agent first.
+name: flotswarm-agent
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+maintainer: Yann Ramin <claude@theatr.us>
+description: |
+  flotswarm agent — long-polls this host's SQS queue and runs allowlisted
+  deploy/ops commands dispatched by the flotswarm distributor. Actions are
+  defined in /etc/flotswarm/actions.d/; privilege is bounded by sudoers.
+license: MIT
+section: admin
+priority: optional
+
+contents:
+  - src: ../target/release/flotswarm-agent
+    dst: /usr/sbin/flotswarm-agent
+    file_info:
+      mode: 0755
+
+  - src: ./systemd/flotswarm-agent.service
+    dst: /usr/lib/systemd/system/flotswarm-agent.service
+
+  # References only — NOT active config. The operator writes the real
+  # agent.conf, actions.d/*.toml, and sudoers per host.
+  - src: ./agent.conf.example
+    dst: /usr/share/doc/flotswarm-agent/agent.conf.example
+  - src: ./sudoers.example
+    dst: /usr/share/doc/flotswarm-agent/sudoers.example
+  - src: ./actions.d/deploy-site.toml
+    dst: /usr/share/doc/flotswarm-agent/actions.d/deploy-site.toml
+  - src: ./actions.d/deploy-docs.toml
+    dst: /usr/share/doc/flotswarm-agent/actions.d/deploy-docs.toml
+
+scripts:
+  postinstall: ./scripts/postinstall.sh
+  preremove: ./scripts/preremove.sh
+  postremove: ./scripts/postremove.sh

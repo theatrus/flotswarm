@@ -1,0 +1,28 @@
+[package]
+name = "flotswarm-distributor"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+# The Lambda custom runtime (provided.al2023) invokes a binary named `bootstrap`.
+[[bin]]
+name = "bootstrap"
+path = "src/main.rs"
+
+[dependencies]
+flotswarm-types = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-sqs = { workspace = true }
+aws-sdk-ssm = { workspace = true }
+aws-smithy-http-client = { workspace = true }
+
+lambda_http = "0.14"
+# HMAC-SHA256 signature check (RustCrypto, pure Rust — not the AWS SDK crypto).
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+time = { version = "0.3", features = ["formatting"] }

@@ -1,0 +1,16 @@
+# /etc/flotswarm/actions.d/deploy-docs.toml
+#
+# Optional `sha` arg pins a specific commit. It is validated for hex format AND
+# repo-state: the agent runs `git -C <repo> merge-base --is-ancestor <sha>
+# <ancestor_of>`, so only a commit actually on the branch can be deployed.
+description = "Sync a docs checkout to a commit on main"
+command     = ["/usr/local/bin/deploy-docs"]
+run_as      = "deploy"
+timeout     = "5m"
+
+[args.sha]
+type        = "sha"                  # ^[0-9a-f]{7,40}$ + repo-state check
+required    = false                  # omitted -> deploy branch tip
+argv        = ["--sha", "${value}"]  # appended only when provided; ${value} = validated sha
+repo        = "/srv/www/docs"
+ancestor_of = "origin/main"

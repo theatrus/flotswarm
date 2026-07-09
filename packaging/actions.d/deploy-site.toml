@@ -1,0 +1,9 @@
+# /etc/flotswarm/actions.d/deploy-site.toml
+#
+# Action id = filename stem ("deploy-site"), matched against the message's
+# `action`. Install root-owned 0644.
+description = "Publish the latest site build"
+command     = ["/usr/local/bin/deploy-site"]  # argv, never a shell string
+run_as      = "deploy"                         # via sudo -u; needs a sudoers rule
+timeout     = "5m"
+# No [args] table -> any args in the message are rejected.

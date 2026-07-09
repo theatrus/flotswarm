@@ -1,0 +1,18 @@
+[package]
+name = "flotswarm-agent"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "flotswarm-agent"
+path = "src/main.rs"
+
+[dependencies]
+flotswarm-types = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-sqs = { workspace = true }
+aws-smithy-http-client = { workspace = true }

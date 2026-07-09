@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/flotswarm-types",
+    "crates/flotswarm-distributor",
+    "crates/flotswarm-agent",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+repository = "https://github.com/theatrus/flotswarm"
+
+[workspace.dependencies]
+flotswarm-types = { path = "crates/flotswarm-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+regex = "1"
+thiserror = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time"] }
+
+# AWS SDKs — crypto locked to aws-lc-rs (no ring). The TLS provider is chosen in
+# aws-smithy-http-client; we disable default features there and select the
+# aws-lc-rs rustls provider explicitly, then build clients over that connector.
+aws-config = { version = "1", default-features = false, features = [
+    "behavior-version-latest",
+    "rt-tokio",
+] }
+aws-sdk-sqs = { version = "1", default-features = false, features = ["rt-tokio"] }
+aws-sdk-ssm = { version = "1", default-features = false, features = ["rt-tokio"] }
+aws-smithy-http-client = { version = "1", default-features = false, features = [
+    "rustls-aws-lc",
+] }

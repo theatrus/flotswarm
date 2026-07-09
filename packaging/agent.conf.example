@@ -1,0 +1,17 @@
+# /etc/flotswarm/agent.conf — sourced by the systemd unit (EnvironmentFile).
+# Created by postinstall from this example on first install; NOT a packaged
+# conffile, so upgrades never overwrite it. Mode 0600.
+
+# This host's identity, used for target matching (an envelope targets "all" or
+# this exact name). Must match a host in the module's `hosts` list.
+FLOTSWARM_HOST=<hostname>
+
+# The SQS queue this host long-polls.
+FLOTSWARM_QUEUE_URL=https://sqs.<region>.amazonaws.com/<account-id>/flotswarm-<hostname>
+AWS_REGION=<region>
+
+# Credentials:
+#   - On EC2: omit — the instance profile is used.
+#   - Off-EC2: set a scoped IAM user's access keys (queue Receive/Delete only).
+# AWS_ACCESS_KEY_ID=...
+# AWS_SECRET_ACCESS_KEY=...

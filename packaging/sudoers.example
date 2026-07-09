@@ -1,0 +1,6 @@
+# /etc/sudoers.d/flotswarm — install mode 0440, validate with `visudo -c`.
+#
+# The agent runs as `flotswarm` and execs each action's command as its `run_as`
+# user. Grant ONLY the specific scripts actions need — never a wildcard or shell.
+# Keep this in lock-step with /etc/flotswarm/actions.d/*.toml.
+flotswarm ALL=(deploy) NOPASSWD: /usr/local/bin/deploy-site, /usr/local/bin/deploy-docs
