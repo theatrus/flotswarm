@@ -171,8 +171,13 @@ fn evaluate(
                 return Ok(Outcome::Ignored("non-release event"));
             }
             let rel: GithubRelease = serde_json::from_slice(body)?;
+            // A new build is available on create/publish/(pre)release, and — for a
+            // rolling "latest" release that CI re-uploads assets to — on `edited`.
+            // The deploy is idempotent, so the burst of edits collapses to one
+            // real deploy. Only `deleted`/`unpublished` are ignored.
             match rel.action.as_deref() {
-                Some("published") | Some("released") | Some("created") => {}
+                Some("created") | Some("published") | Some("released") | Some("prereleased")
+                | Some("edited") => {}
                 _ => return Ok(Outcome::Ignored("release action ignored")),
             }
             dispatch(BTreeMap::new(), source_of(rel.repository))
@@ -455,6 +460,19 @@ mod tests {
                 source: Some("github:acme/site".into()),
             })
         );
+    }
+
+    #[test]
+    fn release_edited_dispatches() {
+        // A rolling "latest" release re-uploads assets -> action=edited.
+        let mut h = hook();
+        h.trigger = Trigger::Release;
+        let body = br#"{"action":"edited","repository":{"full_name":"acme/site"}}"#;
+        let sig = sign("s3cr3t", body);
+        assert!(matches!(
+            evaluate(&h, Some("release"), Some(&sig), body).unwrap(),
+            Outcome::Dispatch(_)
+        ));
     }
 
     #[test]
