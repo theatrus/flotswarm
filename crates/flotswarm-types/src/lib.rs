@@ -64,6 +64,68 @@ pub struct ActionConfig {
     /// Declared args. Anything in the message not listed here is rejected.
     #[serde(default)]
     pub args: BTreeMap<String, ArgSpec>,
+    /// When the agent should emit an outcome notification for this action.
+    #[serde(default)]
+    pub notify: NotifyMode,
+}
+
+/// Per-action notification preference (the `notify` field in an action TOML).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NotifyMode {
+    /// Emit on both success and failure.
+    #[default]
+    Always,
+    /// Emit only when the action fails.
+    OnError,
+    /// Never emit an outcome notification.
+    Never,
+}
+
+impl NotifyMode {
+    /// Whether to publish given the action's success/failure.
+    pub fn should_emit(&self, ok: bool) -> bool {
+        match self {
+            NotifyMode::Always => true,
+            NotifyMode::OnError => !ok,
+            NotifyMode::Never => false,
+        }
+    }
+}
+
+/// Notification event published to the SNS bus by the distributor (dispatch) and
+/// the agents (outcome). Consumed by the notify Lambda. `kind`-tagged so one
+/// topic carries both and the relay can format each.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum NotifyEvent {
+    /// A hook fired at the distributor.
+    Dispatch {
+        hook: String,
+        action: String,
+        /// Host queues the envelope was sent to.
+        targets: Vec<String>,
+        #[serde(default)]
+        source: Option<String>,
+        /// `"dispatched"`, `"ignored:<reason>"`, `"rejected:<reason>"`.
+        outcome: String,
+    },
+    /// An agent finished running an action.
+    Outcome {
+        host: String,
+        action: String,
+        #[serde(default)]
+        source: Option<String>,
+        /// Envelope id (dedup key).
+        id: String,
+        ok: bool,
+        #[serde(default)]
+        exit_code: Option<i32>,
+        duration_s: f64,
+        /// Last lines of combined stdout+stderr (bounded).
+        #[serde(default)]
+        tail: String,
+    },
 }
 
 /// The schema for one accepted arg. The TOML `type = "..."` field selects the

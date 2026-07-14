@@ -28,5 +28,10 @@ output "api_id" {
 
 output "alerts_topic_arn" {
   description = "flotswarm-alerts SNS topic ARN (null when alert_emails is empty)"
-  value       = local.alerts_enabled ? aws_sns_topic.alerts[0].arn : null
+  value       = local.topic_arn
+}
+
+output "notify_topic_arn" {
+  description = "SNS topic agents/distributor publish notify events to (null when notify+alerts both off). Grant same-account agent roles sns:Publish on this; set the agents' FLOTSWARM_SNS_TOPIC_ARN to it."
+  value       = local.topic_arn
 }

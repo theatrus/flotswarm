@@ -196,6 +196,21 @@ fn evaluate(
 struct Ctx {
     ssm: aws_sdk_ssm::Client,
     sqs: aws_sdk_sqs::Client,
+    sns: aws_sdk_sns::Client,
+    /// Optional notify bus; unset (no `FLOTSWARM_SNS_TOPIC_ARN`) → no notify.
+    topic_arn: Option<String>,
+}
+
+impl Ctx {
+    /// Best-effort notify publish — never affects the HTTP response.
+    async fn notify(&self, event: &flotswarm_types::NotifyEvent) {
+        let Some(arn) = &self.topic_arn else { return };
+        if let Ok(msg) = serde_json::to_string(event) {
+            if let Err(e) = self.sns.publish().topic_arn(arn).message(msg).send().await {
+                eprintln!("notify: sns publish failed (non-fatal): {e}");
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -214,6 +229,10 @@ async fn main() -> Result<(), Error> {
     let ctx = Arc::new(Ctx {
         ssm: aws_sdk_ssm::Client::new(&shared),
         sqs: aws_sdk_sqs::Client::new(&shared),
+        sns: aws_sdk_sns::Client::new(&shared),
+        topic_arn: std::env::var("FLOTSWARM_SNS_TOPIC_ARN")
+            .ok()
+            .filter(|s| !s.is_empty()),
     });
 
     lambda_http::run(service_fn(move |req: Request| {
@@ -271,6 +290,14 @@ async fn dispatch(ctx: &Ctx, req: Request) -> Result<Response<Body>, Error> {
                 ts: now_rfc3339(),
             };
             let n = broadcast(ctx, &env).await?;
+            ctx.notify(&flotswarm_types::NotifyEvent::Dispatch {
+                hook: hook_id.clone(),
+                action: env.action.clone(),
+                targets: vec![env.target.clone()],
+                source: env.source.clone(),
+                outcome: format!("dispatched ({n} queue(s))"),
+            })
+            .await;
             resp(202, &format!("dispatched {} to {n} queue(s)", env.action))
         }
         Err(e) => resp(400, &format!("bad payload: {e}")),

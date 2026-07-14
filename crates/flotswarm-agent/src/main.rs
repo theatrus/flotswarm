@@ -14,7 +14,7 @@
 //! never exec). Pass `--once` to drain one receive and exit (handy for testing).
 
 use anyhow::{Context, Result};
-use flotswarm_types::{ActionConfig, Envelope, ExecPlan, ShaCheck};
+use flotswarm_types::{ActionConfig, Envelope, ExecPlan, NotifyEvent, ShaCheck};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -23,6 +23,8 @@ struct Config {
     queue_url: String,
     actions_dir: PathBuf,
     dry_run: bool,
+    /// Optional SNS topic for outcome notifications. Unset → notifications off.
+    sns_topic_arn: Option<String>,
 }
 
 impl Config {
@@ -34,7 +36,38 @@ impl Config {
                 .unwrap_or_else(|_| "/etc/flotswarm/actions.d".to_string())
                 .into(),
             dry_run: std::env::var("FLOTSWARM_DRY_RUN").is_ok_and(|v| !v.is_empty() && v != "0"),
+            sns_topic_arn: std::env::var("FLOTSWARM_SNS_TOPIC_ARN")
+                .ok()
+                .filter(|s| !s.is_empty()),
         })
+    }
+}
+
+/// Outcome notifier — publishes to the SNS bus if a topic is configured; a
+/// no-op otherwise (hosts without `FLOTSWARM_SNS_TOPIC_ARN` simply don't notify).
+struct Notifier {
+    sns: Option<aws_sdk_sns::Client>,
+    topic_arn: Option<String>,
+    host: String,
+}
+
+impl Notifier {
+    /// Publish an already-built event; best-effort (a notify failure must never
+    /// change the action's success/failure or the SQS delete decision).
+    async fn publish(&self, event: &flotswarm_types::NotifyEvent) {
+        let (Some(sns), Some(arn)) = (&self.sns, &self.topic_arn) else {
+            return;
+        };
+        let msg = match serde_json::to_string(event) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("notify: serialize failed: {e}");
+                return;
+            }
+        };
+        if let Err(e) = sns.publish().topic_arn(arn).message(msg).send().await {
+            eprintln!("notify: sns publish failed (non-fatal): {e}");
+        }
     }
 }
 
@@ -63,6 +96,11 @@ async fn main() -> Result<()> {
         .load()
         .await;
     let sqs = aws_sdk_sqs::Client::new(&shared);
+    let notifier = Notifier {
+        sns: cfg.sns_topic_arn.as_ref().map(|_| aws_sdk_sns::Client::new(&shared)),
+        topic_arn: cfg.sns_topic_arn.clone(),
+        host: cfg.host.clone(),
+    };
 
     loop {
         let resp = sqs
@@ -70,6 +108,8 @@ async fn main() -> Result<()> {
             .queue_url(&cfg.queue_url)
             .wait_time_seconds(20)
             .max_number_of_messages(10)
+            // ApproximateReceiveCount lets the outcome note which retry this is.
+            .message_system_attribute_names(aws_sdk_sqs::types::MessageSystemAttributeName::ApproximateReceiveCount)
             .send()
             .await
             .context("sqs receive_message")?;
@@ -77,7 +117,7 @@ async fn main() -> Result<()> {
         for msg in resp.messages() {
             // Ok(()) => handled or cleanly-not-for-us → delete.
             // Err     => failure → leave it; SQS redrives → DLQ after N receives.
-            match handle(&cfg, msg).await {
+            match handle(&cfg, &notifier, msg).await {
                 Ok(()) => {
                     if let Some(rh) = msg.receipt_handle() {
                         sqs.delete_message()
@@ -99,7 +139,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn handle(cfg: &Config, msg: &aws_sdk_sqs::types::Message) -> Result<()> {
+fn receive_count(msg: &aws_sdk_sqs::types::Message) -> u32 {
+    msg.attributes()
+        .and_then(|a| a.get(&aws_sdk_sqs::types::MessageSystemAttributeName::ApproximateReceiveCount))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+}
+
+async fn handle(
+    cfg: &Config,
+    notifier: &Notifier,
+    msg: &aws_sdk_sqs::types::Message,
+) -> Result<()> {
     let body = msg.body().context("message has no body")?;
     let env: Envelope = serde_json::from_str(body).context("parse envelope")?;
 
@@ -140,12 +191,61 @@ async fn handle(cfg: &Config, msg: &aws_sdk_sqs::types::Message) -> Result<()> {
         return Ok(());
     }
 
-    for check in &plan.sha_checks {
-        verify_sha(check).with_context(|| format!("sha check for arg {:?}", check.arg))?;
+    // Execution phase: sha checks then run, capturing output. A failure here is
+    // the *action's* outcome (notified below) — distinct from the pre-flight
+    // parse/target/allowlist checks above, which are silent.
+    let started = std::time::Instant::now();
+    let exec: Result<RunResult> = async {
+        for check in &plan.sha_checks {
+            verify_sha(check).with_context(|| format!("sha check for arg {:?}", check.arg))?;
+        }
+        run(&action, &plan).await
     }
-    run(&action, &plan).await?;
-    eprintln!("done: {} ({})", env.action, env.id);
-    Ok(())
+    .await;
+    let duration_s = started.elapsed().as_secs_f64();
+
+    let (ok, exit_code, tail) = match &exec {
+        Ok(r) => (r.ok, r.exit_code, tail_of(&r.output, 15)),
+        Err(e) => (false, None, format!("{e:#}")),
+    };
+
+    if action.notify.should_emit(ok) {
+        let attempt = receive_count(msg);
+        let tail = if attempt > 1 {
+            format!("[attempt {attempt}]\n{tail}")
+        } else {
+            tail
+        };
+        notifier
+            .publish(&NotifyEvent::Outcome {
+                host: notifier.host.clone(),
+                action: env.action.clone(),
+                source: env.source.clone(),
+                id: env.id.clone(),
+                ok,
+                exit_code,
+                duration_s,
+                tail,
+            })
+            .await;
+    }
+
+    if ok {
+        eprintln!("done: {} ({})", env.action, env.id);
+        Ok(())
+    } else {
+        // Return Err so SQS redrives → DLQ; the notification already went out.
+        Err(exec
+            .err()
+            .unwrap_or_else(|| anyhow::anyhow!("action {} exited non-zero", env.action)))
+    }
+}
+
+/// Last `n` lines of `s`, trimmed of trailing whitespace.
+fn tail_of(s: &str, n: usize) -> String {
+    let lines: Vec<&str> = s.trim_end().lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n")
 }
 
 /// `git -C <repo> merge-base --is-ancestor <sha> <ancestor_of>` — the repo-state
@@ -170,7 +270,14 @@ fn verify_sha(c: &ShaCheck) -> Result<()> {
     Ok(())
 }
 
-async fn run(action: &ActionConfig, plan: &ExecPlan) -> Result<()> {
+/// Result of running an action's command: exit status + captured combined output.
+struct RunResult {
+    ok: bool,
+    exit_code: Option<i32>,
+    output: String,
+}
+
+async fn run(action: &ActionConfig, plan: &ExecPlan) -> Result<RunResult> {
     let (program, rest) = plan.argv.split_first().expect("plan.argv is non-empty");
 
     // argv-only: no shell is ever involved, so values can't inject commands.
@@ -190,15 +297,23 @@ async fn run(action: &ActionConfig, plan: &ExecPlan) -> Result<()> {
         cmd.current_dir(wd);
     }
 
+    // Capture combined output so a tail can ride the outcome notification; still
+    // echo it so the agent journal keeps the full log.
     let dur = parse_timeout(action.timeout.as_deref());
-    let status = tokio::time::timeout(dur, cmd.status())
+    let out = tokio::time::timeout(dur, cmd.output())
         .await
         .map_err(|_| anyhow::anyhow!("action timed out after {dur:?}"))?
         .context("spawning action")?;
-    if !status.success() {
-        anyhow::bail!("action exited with {status}");
+    let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&out.stderr));
+    if !combined.is_empty() {
+        eprint!("{combined}");
     }
-    Ok(())
+    Ok(RunResult {
+        ok: out.status.success(),
+        exit_code: out.status.code(),
+        output: combined,
+    })
 }
 
 /// Parse `"5m"`/`"30s"`/`"1h"`/bare-seconds into a Duration; default 10 minutes.

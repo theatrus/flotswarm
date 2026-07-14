@@ -5,11 +5,34 @@
 
 locals {
   alerts_enabled = length(var.alert_emails) > 0
+  # Rich notifications (dispatch + outcome events → Discord/email) reuse the same
+  # topic. Enabled when a Discord webhook or notify email is configured.
+  notify_enabled = var.discord_webhook_ssm != "" || length(var.notify_email_to) > 0
+  topic_enabled  = local.alerts_enabled || local.notify_enabled
+  topic_arn      = local.topic_enabled ? aws_sns_topic.alerts[0].arn : null
 }
 
 resource "aws_sns_topic" "alerts" {
-  count = local.alerts_enabled ? 1 : 0
+  count = local.topic_enabled ? 1 : 0
   name  = "flotswarm-alerts"
+}
+
+# Cross-account publish: agents in another account need the topic policy to
+# allow their role to publish. Same-account publishers (the distributor and
+# same-account agents) are covered by their own identity policies.
+resource "aws_sns_topic_policy" "publishers" {
+  count = local.topic_enabled && length(var.agent_publisher_arns) > 0 ? 1 : 0
+  arn   = aws_sns_topic.alerts[0].arn
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "CrossAccountAgentPublish"
+      Effect    = "Allow"
+      Principal = { AWS = var.agent_publisher_arns }
+      Action    = "sns:Publish"
+      Resource  = aws_sns_topic.alerts[0].arn
+    }]
+  })
 }
 
 resource "aws_sns_topic_subscription" "alerts_email" {

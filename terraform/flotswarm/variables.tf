@@ -24,3 +24,27 @@ variable "alert_emails" {
   type        = list(string)
   default     = []
 }
+
+variable "discord_webhook_ssm" {
+  description = "SSM parameter name (SecureString) holding the Discord webhook URL. Empty = no Discord relay. The value is set out of band / in tfinfra, never here."
+  type        = string
+  default     = ""
+}
+
+variable "notify_email_from" {
+  description = "Verified SES sender for notify email (empty = no email). E.g. flotswarm@example.com."
+  type        = string
+  default     = ""
+}
+
+variable "notify_email_to" {
+  description = "Recipients for notify email (failed outcomes, firing alarms, rejected hooks)."
+  type        = list(string)
+  default     = []
+}
+
+variable "agent_publisher_arns" {
+  description = "Cross-account IAM role ARNs (member-account agents) allowed to publish outcome events to the notify topic. Same-account agents are granted via their own identity policy in the consuming root."
+  type        = list(string)
+  default     = []
+}

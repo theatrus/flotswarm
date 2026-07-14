@@ -50,7 +50,7 @@ resource "aws_iam_role_policy" "distributor" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Sid      = "SendToHostQueues"
         Effect   = "Allow"
@@ -73,7 +73,13 @@ resource "aws_iam_role_policy" "distributor" {
           StringEquals = { "kms:ViaService" = "ssm.${data.aws_region.current.name}.amazonaws.com" }
         }
       },
-    ]
+      ],
+      local.topic_arn != null ? [{
+        Sid      = "PublishDispatchEvents"
+        Effect   = "Allow"
+        Action   = "sns:Publish"
+        Resource = local.topic_arn
+      }] : [])
   })
 }
 
@@ -92,6 +98,13 @@ resource "aws_lambda_function" "distributor" {
 
   timeout     = 15
   memory_size = 128
+
+  environment {
+    variables = {
+      # Empty when notify is off; the distributor treats "" as unset.
+      FLOTSWARM_SNS_TOPIC_ARN = local.topic_arn == null ? "" : local.topic_arn
+    }
+  }
 }
 
 # --- API Gateway HTTP API: POST /hooks/{id} -> distributor. ---

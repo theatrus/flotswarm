@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 aws-config = { workspace = true }
 aws-sdk-sqs = { workspace = true }
 aws-sdk-ssm = { workspace = true }
+aws-sdk-sns = { workspace = true }
 aws-smithy-http-client = { workspace = true }
 
 lambda_http = "0.14"

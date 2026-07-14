@@ -147,6 +147,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-sns"
+version = "1.105.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3e3fb02359b1ca6b10d0322d58d3581aaf6ebdb63601ad74eb9816231f83e04"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-query",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-smithy-xml",
+ "aws-types",
+ "fastrand",
+ "http 0.2.12",
+ "http 1.4.2",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-sqs"
 version = "1.103.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -728,6 +755,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "aws-config",
+ "aws-sdk-sns",
  "aws-sdk-sqs",
  "aws-smithy-http-client",
  "flotswarm-types",
@@ -740,6 +768,7 @@ name = "flotswarm-distributor"
 version = "0.0.0"
 dependencies = [
  "aws-config",
+ "aws-sdk-sns",
  "aws-sdk-sqs",
  "aws-sdk-ssm",
  "aws-smithy-http-client",
