@@ -79,7 +79,7 @@ resource "aws_iam_role_policy" "distributor" {
         Effect   = "Allow"
         Action   = "sns:Publish"
         Resource = local.topic_arn
-      }] : [])
+    }] : [])
   })
 }
 

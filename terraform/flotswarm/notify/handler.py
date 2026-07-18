@@ -67,9 +67,40 @@ def _send_email(subject, body):
     )
 
 
+def _fmt_dur(dur):
+    return f"{dur:.1f}s" if isinstance(dur, (int, float)) else "?"
+
+
 def _render(msg):
-    """(discord_title, discord_body, color, email?) for one decoded message."""
+    """Decode one message into presentation fields.
+
+    Returns a dict with Discord fields (title/body/color) and email fields
+    (email flag, subject, text). Email subjects are inbox-friendly and
+    prefixed `flotswarm`; email bodies are plain text (no Discord markdown).
+    """
     kind = msg.get("kind")
+    if kind == "outcome":
+        ok = bool(msg.get("ok"))
+        action, host = msg.get("action", "?"), msg.get("host", "?")
+        dur = _fmt_dur(msg.get("duration_s"))
+        code = msg.get("exit_code")
+        tail = msg.get("tail") or ""
+        src = msg.get("source") or ""
+        icon = "✅" if ok else "❌"
+        result = "succeeded" if ok else f"failed (exit {code})"
+        title = f"{icon} {action} @ {host}: {result}"
+        subject = f"flotswarm {icon} {action} @ {host} — {'ok' if ok else 'FAILED'}"
+        lines = [f"Action:   {action}", f"Host:     {host}",
+                 f"Result:   {result}", f"Duration: {dur}"]
+        if src:
+            lines.append(f"Source:   {src}")
+        text = "\n".join(lines)
+        if tail:
+            text += "\n\n--- output tail ---\n" + tail[:1800]
+        dbody = f"{dur}\n```\n{tail[:1500]}\n```" if tail else dur
+        return {"title": title, "body": dbody,
+                "color": COLORS["ok"] if ok else COLORS["error"],
+                "email": True, "subject": subject, "text": text}
     if kind == "dispatch":
         action, hook = msg.get("action", "?"), msg.get("hook", "?")
         targets = ", ".join(msg.get("targets") or []) or "?"
@@ -77,27 +108,29 @@ def _render(msg):
         outcome = msg.get("outcome", "")
         rejected = outcome.startswith(("rejected", "ignored"))
         title = f"📤 dispatch: {action} → {targets}"
-        body = f"hook `{hook}` {outcome}" + (f"\nsource: {src}" if src else "")
-        return title, body, COLORS["dispatch"], rejected
-    if kind == "outcome":
-        ok = bool(msg.get("ok"))
-        action, host = msg.get("action", "?"), msg.get("host", "?")
-        dur = msg.get("duration_s")
-        code = msg.get("exit_code")
-        tail = msg.get("tail") or ""
-        status = "✅ ok" if ok else f"❌ error (exit {code})"
-        title = f"{status}: {action} @ {host}"
-        meta = f"{dur:.1f}s" if isinstance(dur, (int, float)) else ""
-        body = (f"{meta}\n```\n{tail[:1500]}\n```" if tail else meta)
-        return title, body, COLORS["ok"] if ok else COLORS["error"], not ok
+        dbody = f"hook `{hook}` {outcome}" + (f"\nsource: {src}" if src else "")
+        subject = f"flotswarm ⚠ dispatch {outcome}: {action}"
+        lines = [f"Hook:     {hook}", f"Action:   {action}",
+                 f"Targets:  {targets}", f"Outcome:  {outcome}"]
+        if src:
+            lines.append(f"Source:   {src}")
+        return {"title": title, "body": dbody, "color": COLORS["dispatch"],
+                "email": rejected, "subject": subject, "text": "\n".join(lines)}
     if "AlarmName" in msg:
         name = msg.get("AlarmName", "?")
         state = msg.get("NewStateValue", "?")
         reason = msg.get("NewStateReason", "")
-        title = f"🚨 alarm {state}: {name}"
-        return title, reason, COLORS["alarm"], state == "ALARM"
+        icon = "🚨" if state == "ALARM" else ("✅" if state == "OK" else "ℹ️")
+        title = f"{icon} alarm {state}: {name}"
+        subject = f"flotswarm {icon} {state}: {name}"
+        text = f"Alarm:  {name}\nState:  {state}\n\n{reason}"
+        return {"title": title, "body": reason, "color": COLORS["alarm"],
+                "email": state == "ALARM", "subject": subject, "text": text}
     # Unknown shape — surface it rather than drop it.
-    return "flotswarm event", json.dumps(msg)[:1500], COLORS["dispatch"], False
+    dump = json.dumps(msg, indent=2)
+    return {"title": "flotswarm event", "body": dump[:1500],
+            "color": COLORS["dispatch"], "email": False,
+            "subject": "flotswarm event", "text": dump[:1800]}
 
 
 def handler(event, _ctx):
@@ -107,14 +140,14 @@ def handler(event, _ctx):
             msg = json.loads(raw)
         except (ValueError, TypeError):
             msg = {"kind": None, "raw": raw}
-        title, body, color, email = _render(msg)
+        r = _render(msg)
         try:
-            _post_discord(title, body, color)
+            _post_discord(r["title"], r["body"], r["color"])
         except Exception as e:  # noqa: BLE001 — never fail the whole batch on one channel
             print(f"discord post failed: {e}")
-        if email:
+        if r["email"]:
             try:
-                _send_email(title, (body or "").replace("```", ""))
+                _send_email(r["subject"], r["text"])
             except Exception as e:  # noqa: BLE001
                 print(f"ses send failed: {e}")
     return {"ok": True}

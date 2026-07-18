@@ -35,8 +35,12 @@ resource "aws_sns_topic_policy" "publishers" {
   })
 }
 
+# Raw SNS email subscription (unformatted JSON, "AWS Notifications" sender).
+# Suppressed when the notify Lambda is enabled — it emails the same recipients
+# (alert_emails ∪ notify_email_to) as formatted, subject-lined SES mail. Kept
+# only as a fallback when notify is off entirely.
 resource "aws_sns_topic_subscription" "alerts_email" {
-  for_each  = toset(var.alert_emails)
+  for_each  = local.notify_enabled ? toset([]) : toset(var.alert_emails)
   topic_arn = aws_sns_topic.alerts[0].arn
   protocol  = "email"
   endpoint  = each.value

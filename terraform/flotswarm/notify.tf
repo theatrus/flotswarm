@@ -82,7 +82,10 @@ resource "aws_lambda_function" "notify" {
     variables = {
       DISCORD_WEBHOOK_SSM = var.discord_webhook_ssm
       EMAIL_FROM          = var.notify_email_from
-      EMAIL_TO            = join(",", var.notify_email_to)
+      # Formatted email goes to notify_email_to plus alert_emails — the latter
+      # would otherwise only get the raw SNS email subscription (suppressed in
+      # alerts.tf when notify is enabled).
+      EMAIL_TO = join(",", distinct(concat(var.notify_email_to, var.alert_emails)))
     }
   }
 }
